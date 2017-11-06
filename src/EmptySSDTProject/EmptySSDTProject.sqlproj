@@ -4,16 +4,16 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <Name>SampleSSDTProject</Name>
+    <Name>EmptySSDTProject</Name>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectVersion>4.1</ProjectVersion>
-    <ProjectGuid>{be2e453d-02da-4af2-b4fd-0cfc20ba74d5}</ProjectGuid>
+    <ProjectGuid>{9951abc9-27b4-4862-9878-58c3e0b294a8}</ProjectGuid>
     <DSP>Microsoft.Data.Tools.Schema.Sql.Sql130DatabaseSchemaProvider</DSP>
     <OutputType>Database</OutputType>
     <RootPath>
     </RootPath>
-    <RootNamespace>SampleSSDTProject</RootNamespace>
-    <AssemblyName>SampleSSDTProject</AssemblyName>
+    <RootNamespace>EmptySSDTProject</RootNamespace>
+    <AssemblyName>EmptySSDTProject</AssemblyName>
     <ModelCollation>1033, CI</ModelCollation>
     <DefaultFileStructure>BySchemaAndSchemaType</DefaultFileStructure>
     <DeployToDatabase>True</DeployToDatabase>
@@ -59,9 +59,6 @@
     <Folder Include="Properties" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="SampleSSDTProject.publish.xml" />
-  </ItemGroup>
-  <ItemGroup>
-    <Build Include="ATable.sql" />
+    <None Include="EmptySSDTProject.publish.xml" />
   </ItemGroup>
 </Project>
