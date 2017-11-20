@@ -1,5 +1,9 @@
 [CmdLetBinding()]
 param(
+    [version] $targetVersion,
+	[switch] $isMajor,
+	[switch] $isMinor,
+	[switch] $whatif
 )
 
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path
@@ -9,7 +13,8 @@ $migrationsDir = Join-Path $projectDir "migrations"
 
 pushd $scriptDir
 try{
-    ..\lightway\Create-Migration.ps1 -projectPath:$projectPath -migrationsDir:$migrationsDir
+    ..\lightway\Create-Migration.ps1 -projectPath:$projectPath -migrationsDir:$migrationsDir `
+        -targetVersion:$targetVersion -isMajor:$isMajor -isMinor:$isMinor -whatif:$whatif
 
 }finally{
     popd;
