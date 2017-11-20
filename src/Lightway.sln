@@ -6,10 +6,6 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "SampleSSDTProject", "SampleSSDTProject\SampleSSDTProject.sqlproj", "{BE2E453D-02DA-4AF2-B4FD-0CFC20BA74D5}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{14A15B37-7F03-48C8-8B95-562107474E19}"
-	ProjectSection(SolutionItems) = preProject
-		CreateRelease.ps1 = CreateRelease.ps1
-		Lightway.ps1 = Lightway.ps1
-	EndProjectSection
 EndProject
 Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "EmptySSDTProject", "EmptySSDTProject\EmptySSDTProject.sqlproj", "{9951ABC9-27B4-4862-9878-58C3E0B294A8}"
 EndProject
