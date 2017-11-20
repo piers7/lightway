@@ -64,6 +64,5 @@
   </ItemGroup>
   <ItemGroup>
     <Build Include="ATable.sql" />
-    <Build Include="Schema_Version.sql" />
   </ItemGroup>
 </Project>
