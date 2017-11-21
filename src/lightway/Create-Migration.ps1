@@ -8,17 +8,20 @@
 # This script is part of Lightway - https://github.com/piers7/lightway/
 [CmdLetBinding()]
 param(
-	# Path to the SSDT project that represents the current model
-	[Parameter(Mandatory=$true)]
-	$projectPath,
+	# Path to the SSDT project that represents the current model (defaults to first .sqlproj in current directory)
+	$projectPath = $(dir *.sqlproj | select-object -First:1 -ExpandProperty:FullName),
+
 	# The database name to be used in the generated migration scripts. This can be overridden using SQLCMD parameters
 	$databaseName = $([System.IO.Path]::GetFileNameWithoutExtension($projectPath)),
 
 	# The location of where the migration scripts are generated to ( 'migrations' under the project folder by default)
     $migrationsDir = "migrations",
 
-    [version] $targetVersion,
+	# If provided, specifies a target version for the migration, otherwise the previous version is rolled
+	[version] $targetVersion,
+	# If set (and targetVersion not set), the major part of the version number is rolled
 	[switch] $isMajor,
+	# If set (and targetVersion not set), the minor part of the version number is rolled
 	[switch] $isMinor,
 	[switch] $whatif
 )
@@ -89,7 +92,7 @@ function findSqlPackage(){
 			)
 
 		$sqlPackage = $possiblePaths |
-			? { Get-Item $_ } |
+			% { Get-Item $_ } |
 			Select-Object -First:1
 	}
 	Write-Verbose "Using $sqlPackage"
