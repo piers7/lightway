@@ -57,7 +57,7 @@ if (![IO.File]::Exists($projectPath)){
 $projectDir = Split-Path -Parent $projectPath
 $projectName = [IO.Path]::GetFileNameWithoutExtension($projectPath)
 # migrationsDir is resolved relative to $PWD *if supplied*, to projectDir otherwise
-$migrationsDir = if($migrationsDir) { (Resolve-Path $migrationsDir).Path } else { Join-Path $projectDir $migrationsDir }
+$migrationsDir = if($migrationsDir) { $migrationsDir } else { Join-Path $projectDir $migrationsDir }
 
 Write-Verbose "ProjectPath = $projectPath"
 Write-Verbose "MigrationsDir = $migrationsDir"
@@ -116,7 +116,7 @@ function getCurrentVersion([Parameter(Mandatory=$true)] $migrationsDir) {
 }
 
 # .synopsis Creates a new migration script, based on a source and destination dacpack
-function createMigration($source,$target,$outputPath,$databaseName){
+function createMigration($source, $target, $outputPath, $databaseName, $parameters){
 	Write-Verbose "Create migration: $source -> $target => $outputPath"
 	$sqlPackager = findSqlPackage
 	# See <https://msdn.microsoft.com/library/hh550080(vs.103).aspx#Script Parameters and Properties>
@@ -130,6 +130,13 @@ function createMigration($source,$target,$outputPath,$databaseName){
 		#,"/p:DoNotDropObjectTypes:Tables" # semicolon seperated
 		#,"/p:ExcludeObjectTypes:Logins"   # semicolon seperated
 	)
+	if($parameters){
+		$extras = @(
+			$parameters.GetEnumerator() |
+			% { "/p:{0}={1}" -f $_.Key,$_.Value}
+		)
+		$sqlPackagerArgs += $extras		
+	}
 
 	ensureExists (split-path -parent $outputPath)
 
@@ -193,10 +200,14 @@ try{
 
 	try{
 		Write-Host ".. create delta v$targetVersion" -ForegroundColor:Yellow
-		createMigration -source:$currentSnapshot -target:$targetSnapshot -outputPath:"$targetDir\Upgrade.sql" -databaseName:$databaseName
+		createMigration -source:$targetSnapshot -target:$currentSnapshot -outputPath:"$targetDir\Upgrade.sql" -databaseName:$databaseName
 
 		Write-Host ".. create undo v$targetVersion" -ForegroundColor:Yellow
-		createMigration -source:$targetSnapshot -target:$currentSnapshot -outputPath:"$targetDir\Rollback.sql" -databaseName:$databaseName
+		createMigration -source:$currentSnapshot -target:$targetSnapshot -outputPath:"$targetDir\Rollback.sql" -databaseName:$databaseName `
+			-parameters:@{
+				DropObjectsNotInSource=$true;
+				BlockOnPossibleDataLoss=$false;
+			}
 	}catch{
 		Write-Warning "Failed. Rolling back temporary state"
 		Write-Verbose "Removing $targetDir"
