@@ -70,6 +70,16 @@ function expandVersionNumber([Version]$version){
     $version
 }
 
+function reduceVersionNumber([Version]$version){
+    if($version.Build -gt 0){
+        return new-object Version ($version.Major,$version.Minor,($version.Build-1))
+    }elseif($version.Minor -gt 0){
+        return new-object Version ($version.Major,($version.Minor-1),([int32]::MaxValue))
+    }else{
+        return new-object Version (($version.Major-1),([int32]::MaxValue),([int32]::MaxValue))
+    }
+}
+
 # .synopsys 
 # Extracts the version number from a script path
 function get-scriptversion($scriptPath) {
@@ -262,8 +272,11 @@ function deployFromMigrations(
                 ($_.Version -gt $to) -and (!$from -or ($_.Version -le $from))
             } |
             % {
-                Invoke-MigrationScript -script:$_.FullName -version:$_.Version -type:'Rollback'
+                $resultingVersion = reduceVersionNumber $_.Version 
+                Invoke-MigrationScript -script:$_.FullName -version:$resultingVersion -type:'Rollback'
             }
+        writeSchemaVersion -version:$to -type:'Rollback' -script:'Rollback result' -success -duration:([Timespan]::Zero)
+
     } else {
         Get-Scripts $scriptsPath -filter:*upgrade.sql | 
             ? {
