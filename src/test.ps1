@@ -4,6 +4,7 @@ param(
     #$serverInstance = "docker:lightway",
     $databaseName = 'LightwayDb.Test',
     [PSCredential] $credentials,
+    [switch]$fromModel,
     [switch]$useDocker
 )
 
@@ -53,7 +54,7 @@ try{
     [void] (.\lightway\Exec-SqlCommand.ps1 -serverInstance:$serverInstance -credentials:$credentials -commandText:$dropSql)
 
     # Migrate it
-    .\lightway\Deploy-Database.ps1 -serverInstance:$serverInstance -databaseName:$databaseName -credentials:$credentials -migrationsDir:.\SampleSSDTProject\migrations -model:.\SampleSSDTProject\bin\debug\SampleSSDTProject.dacpac -fromModel
+    .\lightway\Deploy-Database.ps1 -serverInstance:$serverInstance -databaseName:$databaseName -credentials:$credentials -migrationsDir:.\SampleSSDTProject\migrations -model:.\SampleSSDTProject\bin\debug\SampleSSDTProject.dacpac -fromModel:$fromModel
 
     if($useDocker){
         Write-Verbose "Cleanup container $containerId"

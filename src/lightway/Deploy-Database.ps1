@@ -25,7 +25,7 @@ param(
 
 	[PSCredential] $credentials,
 
-	$schemaVersionTable = "dbo.SCHEMA_VERSION",
+	$schemaTable = "dbo.SCHEMA_VERSION",
 	$migrationsDir = "../migrations/",
 
 	# Version to migrate from, determined from tracking table in schema if not supplied
@@ -38,6 +38,7 @@ param(
 	# If -fromModel specified, the path to the DACPAC that represents the model for this deployment
 	$model,
 
+    [switch]$allowCreate,
 	[switch]$skipPreScripts,
 	[switch]$skipPostScripts
 )
@@ -112,7 +113,12 @@ function exec([scriptblock]$fn, [switch]$warningsAsErrors){
 	if($warningsAsErrors -and (!$?))    { throw 'Process returned errors to std.out'}
 }
 
-function Invoke-SqlCommand($commandText, $commandParams, [switch]$execScalar){
+function Invoke-SqlCommand(
+    $commandText, 
+    $commandParams, 
+    $databaseName=$databaseName,
+    [switch]$execScalar
+){
 	& $scriptDir\Exec-SqlCommand.ps1 -serverInstance:$serverInstance -databaseName:$databaseName -credentials:$credentials -commandText:$commandText -commandParams:$commandParams -execScalar:$execScalar
 }
 
@@ -122,47 +128,42 @@ function Invoke-SqlScriptFile{
         [parameter(mandatory=$true, valuefrompipeline=$true, valuefrompipelinebypropertyname=$true)]
         [alias("fullname")]
         [string[]]$scriptpath,
-        [string[]]$scriptargs
+        [hashtable]$scriptargs=@{DatabaseName=$databaseName}
     )
-    begin{}
+    begin{
+        $sqlScriptArgs = @($scriptArgs.GetEnumerator() | % { "{0}={1}" -f $_.Key,$_.Value })
+    }
     process{
-        Invoke-SqlCmd -serverinstance:$serverinstance -database:$datatabasename -inputfile:$scriptpath
+        Invoke-SqlCmd -serverinstance:$serverInstance -database:$databaseName -inputfile:$_ -Variable:$sqlScriptArgs
     }
     end{}
 }
 
 # .synopsis
 # Create the versions table in the database, if it doesn't exist already
-function initDatabase(){
-	$schemaVersionParts = $schemaVersionTable -split '\.',2
+function initDatabase([switch]$allowCreate){
+    if($allowCreate){
+        exec {
+            [void] (Invoke-SqlCommand -databaseName:master -commandText:"IF NOT EXISTS (select * from sys.databases where name = '$databaseName') CREATE DATABASE $databaseName")
+        }
+    }
+
+    $scripts = @(
+        "$scriptDir\sql\InitDatabase.sql"
+    )
+
+	$schemaVersionParts = $schemaTable -split '\.',2
 	$schema = $schemaVersionParts[0]
 	$table = $schemaVersionParts[1]
-	$baseArgs = @(
-		'-S',$serverInstance
-		'-d',$databaseName
-		'-i',"$scriptDir\sql\InitDatabase.sql" 
-	)
-	Write-Verbose ($baseArgs -join ' ')
-	if($credentials){
-		$username = $credentials.UserName
-		$password = $credentials.GetNetworkCredential().Password
-		$baseArgs += @(
-			'-U',$username
-			'-P',$password
-		)
-		Write-Verbose "Init $serverInstance $databaseName as '$username'"
-	}else{
-		$baseArgs += '-E'
-		Write-Verbose "Init $serverInstance $databaseName with integrated auth $($env:username)"
-	}
-	
-	exec {
-		sqlcmd $baseArgs -v schemaVersionSchemaName="$schema" -v schemaVersionTableName="$table"
-	}
+
+    $scripts | Invoke-SqlScriptFile -scriptargs:@{
+        schemaVersionSchemaName=$schema
+        schemaVersionTableName=$table
+    }
 }
 
 function getCurrentSchemaVersion() {
-	$sql = "select top 1 [version] from $schemaVersionTable order by installed_rank desc"
+	$sql = "select top 1 [version] from $schemaTable order by installed_rank desc"
 	$versionTxt = Invoke-SqlCommand -commandText:$sql -execScalar
 	[Version]$version = [Version]'0.0.0'
 	if([Version]::TryParse($versionTxt, [ref]$version)){
@@ -174,7 +175,7 @@ function getCurrentSchemaVersion() {
 
 function writeSchemaVersion($version, $type, $script, [timespan]$duration, [switch]$success){
 	$sql = @"
-INSERT INTO $schemaVersionTable 
+INSERT INTO $schemaTable 
 ([Version], [Type], [Script], [Installed_On], [Installed_By], [Success], [Execution_Time]) 
 VALUES
 (@version, @type, @script, getdate(), @installed_by, @success, @execution_time)
@@ -208,7 +209,8 @@ function runPostScripts() {
     get-childitem "$migrationsDir\Post-Deployment" -filter "*.sql" | Sort-Object -Property:Name | Invoke-SqlScriptFile
 }
 
-function execMigrationAction([scriptblock]$action, $version, $type = 'Upgrade', $script){
+function Invoke-MigrationAction([scriptblock]$action, $version, $type = 'Upgrade', $script){
+    Write-Host "Execute $script"
     if ($pscmdlet.ShouldProcess($script, "Execute $type $script?")){
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $isSuccess = $true;
@@ -226,8 +228,10 @@ function execMigrationAction([scriptblock]$action, $version, $type = 'Upgrade', 
     }
 }
 
-function execMigrationRollback([scriptblock]$action, $version, $script){
-    execMigrationAction -action:$action -version:$version -type:Rollback -script:$script
+function Invoke-MigrationScript($script, $version, $type){
+    Invoke-MigrationAction -version:$version -type:$type -script:$script -action:{
+        $script | Invoke-SqlScriptFile
+    }
 }
 
 function deployFromModel($dacpac, [version]$targetVersion){
@@ -235,11 +239,39 @@ function deployFromModel($dacpac, [version]$targetVersion){
     $dacpac = (Resolve-Path $dacpac).Path
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-    execMigrationAction -version:$targetVersion -script:$dacpac {
+    Invoke-MigrationAction -version:$targetVersion -script:$dacpac {
     	Exec-SqlPackageDeployment $dacpac -sqlInstance:$serverInstance -databaseName:$databaseName
 
         # Nasty hack: deploying 'from model' can delete the versions table, may need to re-create
 	    initDatabase
+    }
+}
+
+function deployFromMigrations(
+    [Parameter(Mandatory=$true)] [version]$from,
+    [Parameter(Mandatory=$true)] [version]$to
+){
+
+    $isRollback = $to -and ($from -gt $to)
+    $scriptsPath = "$migrationsDir\v*"
+    
+    if($isRollback){
+        Write-Warning "Executing rollback $from -> $to"
+        Get-Scripts $scriptsPath -filter:*rollback.sql -reverseOrder:$true | 
+            ? {
+                ($_.Version -gt $to) -and (!$from -or ($_.Version -le $from))
+            } |
+            % {
+                Invoke-MigrationScript -script:$_.FullName -version:$_.Version -type:'Rollback'
+            }
+    } else {
+        Get-Scripts $scriptsPath -filter:*upgrade.sql | 
+            ? {
+                ($_.Version -gt $from) -and (!$to -or ($_.Version -le $to))
+            } |
+            % {
+                Invoke-MigrationScript -script:$_.FullName -version:$_.Version -type:'Upgrade'
+            }
     }
 }
 
@@ -273,30 +305,37 @@ function runMigration(
 }
 
 # Create version table if doesn't already exist
-initDatabase
+initDatabase -allowCreate:$allowCreate
 
 if ($fromModel -and $toVersion){
 	throw "Can't specify target version when deploying from model - at present will always push latest model"
 }
 
 # Establish the version range for this release (for unspecified parameters)
-if(!$toVersion){
-	$toVersion = getCurrentModelVersion
-}
 if(!$fromVersion){
 	$fromVersion = getCurrentSchemaVersion        
 }
-
-if(!($force -or $fromModel) -and ($toVersion -eq $fromVersion)){
-	Write-Host "Migrate from $fromVersion to $toVersion - nothing to do!"
-	return
-}else{
-	Write-Host "Migrate from $fromVersion to $toVersion (Push model: $fromModel)" -ForegroundColor:Yellow
-	Write-Host
+if(!$toVersion){
+	$toVersion = getCurrentModelVersion
 }
 
-# Actually perform the migration
-runMigration -fromVersion:$fromVersion -toVersion:$toVersion -fromModel:$fromModel -skipPreScripts:$skipPreScripts -skipPostScripts:$skipPostScripts
+$fromVersion = expandVersionNumber $fromVersion
+$toVersion = expandVersionNumber $toVersion
+$noMigrationRequired = $toVersion -eq $fromVersion
+
+if($noMigrationRequired -and (-not $force)){
+	Write-Host "Migrate from $fromVersion to $toVersion - nothing to do!"
+	return
+}elseif($fromModel){
+	Write-Host "Push model as $toVersion" -ForegroundColor:Yellow
+    runMigration -toVersion:$toVersion -fromModel:$true -skipPreScripts:$skipPreScripts -skipPostScripts:$skipPostScripts
+
+}else{
+	Write-Host "Migrate from $fromVersion to $toVersion" -ForegroundColor:Yellow
+	Write-Host
+    # Actually perform the migration
+    runMigration -fromVersion:$fromVersion -toVersion:$toVersion -skipPreScripts:$skipPreScripts -skipPostScripts:$skipPostScripts
+}
 
 # Dump out final state to console
 @{
