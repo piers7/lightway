@@ -140,7 +140,7 @@ function initDatabase(){
 	$baseArgs = @(
 		'-S',$serverInstance
 		'-d',$databaseName
-		'-i',"$scriptDir\sql\Init Database.sql" 
+		'-i',"$scriptDir\sql\InitDatabase.sql" 
 	)
 	Write-Verbose ($baseArgs -join ' ')
 	if($credentials){
