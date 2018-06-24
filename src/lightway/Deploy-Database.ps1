@@ -71,12 +71,14 @@ function expandVersionNumber([Version]$version){
 }
 
 function reduceVersionNumber([Version]$version){
+    $maxPartialVersion = 99999 # in theory, int32.MaxValue, but this seems high enough
+
     if($version.Build -gt 0){
         return new-object Version ($version.Major,$version.Minor,($version.Build-1))
     }elseif($version.Minor -gt 0){
-        return new-object Version ($version.Major,($version.Minor-1),([int32]::MaxValue))
+        return new-object Version ($version.Major,($version.Minor-1),$maxPartialVersion)
     }else{
-        return new-object Version (($version.Major-1),([int32]::MaxValue),([int32]::MaxValue))
+        return new-object Version (($version.Major-1),$maxPartialVersion,$maxPartialVersion)
     }
 }
 
@@ -264,27 +266,37 @@ function deployFromMigrations(
 
     $isRollback = $to -and ($from -gt $to)
     $scriptsPath = "$migrationsDir\v*"
-    
-    if($isRollback){
-        Write-Warning "Executing rollback $from -> $to"
-        Get-Scripts $scriptsPath -filter:*rollback.sql -reverseOrder:$true | 
+    $type = if ($isRollback) { 'Rollback' } else { 'Upgrade' }
+
+    $scriptsToRun = `
+        if($isRollback){
+            Get-Scripts $scriptsPath -filter:*rollback.sql -reverseOrder:$true | 
             ? {
                 ($_.Version -gt $to) -and (!$from -or ($_.Version -le $from))
-            } |
-            % {
-                $resultingVersion = reduceVersionNumber $_.Version 
-                Invoke-MigrationScript -script:$_.FullName -version:$resultingVersion -type:'Rollback'
             }
-        writeSchemaVersion -version:$to -type:'Rollback' -script:'Rollback result' -success -duration:([Timespan]::Zero)
-
-    } else {
-        Get-Scripts $scriptsPath -filter:*upgrade.sql | 
+        }else{
+            Get-Scripts $scriptsPath -filter:*upgrade.sql | 
             ? {
                 ($_.Version -gt $from) -and (!$to -or ($_.Version -le $to))
-            } |
-            % {
-                Invoke-MigrationScript -script:$_.FullName -version:$_.Version -type:'Upgrade'
             }
+        }
+    
+    if(!($scriptsToRun -or $isRollback)){
+        Write-Warning "Warning: no scripts located. Version number will not be updated"
+    }
+
+    $scriptsToRun |
+        %{
+            $resultingVersion = if ($isRollback) { reduceVersionNumber $_.Version } else { $_.Version }
+            Invoke-MigrationScript -script:$_.FullName -version:$resultingVersion -type:$type
+        }
+
+    if($isRollback){
+        # HACK: Write a final entry reflecting the end state at the end of the migration
+        # Really, need to get each script to do this as it goes, because only really then
+        # do we actually know what each script rolls back *to*
+        # However we can at least write an overall result entry
+        writeSchemaVersion -version:$to -type:'Rollback' -script:"Rollback to $to" -success -duration:([Timespan]::Zero)
     }
 }
 
@@ -344,7 +356,11 @@ if($noMigrationRequired -and (-not $force)){
     runMigration -toVersion:$toVersion -fromModel:$true -skipPreScripts:$skipPreScripts -skipPostScripts:$skipPostScripts
 
 }else{
-	Write-Host "Migrate from $fromVersion to $toVersion" -ForegroundColor:Yellow
+    if($fromVersion -gt $toVersion){
+	    Write-Warning "Rollback from $fromVersion to $toVersion"
+    }else{
+	    Write-Host "Migrate from $fromVersion to $toVersion" -ForegroundColor:Yellow
+    }
 	Write-Host
     # Actually perform the migration
     runMigration -fromVersion:$fromVersion -toVersion:$toVersion -skipPreScripts:$skipPreScripts -skipPostScripts:$skipPostScripts
