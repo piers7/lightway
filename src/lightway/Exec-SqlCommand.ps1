@@ -2,29 +2,42 @@ param(
     $serverInstance,
     $databaseName,
     $commandText,
+    [hashtable]$commandParams = @{},
     [pscredential] $credentials,
-    $providerName = "SQLOLEDB" # or OraOLEDB.Oracle etc...
+    $providerName,   # specify a registered .net driver name, eg System.Sql.SqlClient
+    $oleDbDriverName, # use SQLOLEDB or OraOLEDB.Oracle etc..
+    [switch] $execScalar
 )
 
-$connectionStringParts = @{
-    "Data Source" = $serverInstance
-    "Provider" = $providerName
+if ($providerName){
+    $factory = [System.Data.Common.DbProviderFactories]::GetFactory($providerName)
+    $builder = $factory.CreateConnectionStringBuilder()
+}elseif($oleDbDriverName){
+    $factory = [System.Data.Common.DbProviderFactories]::GetFactory('System.Data.OleDb')
+    $builder = $factory.CreateConnectionStringBuilder()
+    [void] $builder.Add("Provider", $oleDbDriverName)
+}else{
+    $factory = [System.Data.Common.DbProviderFactories]::GetFactory('System.Data.SqlClient')
+    $builder = $factory.CreateConnectionStringBuilder()
 }
-if($databaseName){ [void] $connectionStringParts.Add("Initial Catalog", $databaseName) }
+[void] $builder.Add("Data Source", $serverInstance)
+if ($databaseName) { [void] $builder.Add("Initial Catalog", $databaseName) }
 
 if($credentials){
     $username = $credentials.UserName
     $password = $credentials.GetNetworkCredential().Password
-    [void] $connectionStringParts.Add("User Id", $username)
-    [void] $connectionStringParts.Add("Password", $password)
+    [void] $builder.Add("User Id", $username)
+    [void] $builder.Add("Password", $password)
 }else{
-    [void] $connectionStringParts.Add("Integrated Security", "SSPI")
+    [void] $builder.Add("Integrated Security", "SSPI")
 }
 
-$conn = new-object system.data.oledb.oledbconnection
-$connectionString = ($connectionStringParts.GetEnumerator() | % { "{0}={1}" -f $_.Key,$_.Value }) -join ";"
+$connectionString = $builder.ToString()
+Write-Verbose $connectionString
 
+$conn = $factory.CreateConnection()
 $conn.ConnectionString = $connectionString
+
 [void] $conn.Open()
 try{
     $command = $conn.CreateCommand();
@@ -38,7 +51,11 @@ try{
         }
     }
     Write-Verbose "Execute '$commandText'"
-    $command.ExecuteNonQuery();
+    if($execScalar){
+        $command.ExecuteScalar();
+    }else{
+        $command.ExecuteNonQuery();
+    }
 }finally{
     [void] $conn.Close();
 }
