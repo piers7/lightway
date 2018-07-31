@@ -3,12 +3,23 @@
 <#
 .SYNOPSIS
 Deploys or upgrades a target database from a set of migration scripts
+
 .DESCRIPTION
 This script migrates a database schema between one version and another,
 based on either a series of canned migration scripts (the default), or (optionally) a model snapshot file.
 
 By default the script will migrate the database between its current version (based on a tracking
 table in the schema) to the latest version, but both -fromVersion and -toVersion may be specified if required.
+
+Scripts are expected to follow the following folder conventions:
+\migrations\v1.5.0\v1.5.0.Upgrade.sql
+\migrations\v1.5.5\v1.5.5.Upgrade.sql
+
+or (if you need multiple scripts per migration):
+\migrations\v1.5.0\01.Something.Upgrade.sql
+\migrations\v1.5.0\02.SomethingElse.Upgrade.sql
+
+
 .NOTES
 Migration scripts are executed using System.Version sorting semantics.
 Version numbers are padded out to three parts before sorting, to 'fix' some OOB sorting issues.
